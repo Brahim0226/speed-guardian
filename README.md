@@ -36,7 +36,25 @@ test/
 | Sustained duration before alert | 10 s |
 | Cooldown between alerts | 5 min |
 
-## البدء / Getting started
+## بدون كمبيوتر: البناء على GitHub / Build on GitHub only
+
+كل push على `main` يشغّل **GitHub Actions** (`.github/workflows/build.yml`) اللي يبني ملف APK.
+
+1. في Firebase: أضف تطبيق **Android** باسم الحزمة `com.speedguardian.speed_guardian`.
+2. من إعدادات المشروع خُذ هذي القيم (موجودة في `google-services.json` وفي صفحة الإعدادات).
+3. في GitHub: **Settings → Secrets and variables → Actions → New repository secret**، وأنشئ:
+
+| Secret | Where to find it |
+|---|---|
+| `FIREBASE_API_KEY` | `current_key` / Web API Key |
+| `FIREBASE_APP_ID` | `mobilesdk_app_id` (يبدأ بـ `1:`) |
+| `FIREBASE_MESSAGING_SENDER_ID` | `project_number` |
+| `FIREBASE_PROJECT_ID` | `project_id` |
+| `FIREBASE_STORAGE_BUCKET` | `storage_bucket` |
+
+4. في تبويب **Actions** شغّل *Build Android APK*، وبعد ما يكمل نزّل **speed-guardian-apk** من قسم Artifacts وثبّت الـ APK على هاتفك.
+
+## البدء على كمبيوتر / Getting started locally
 
 > ⚠️ هذا الكود مكتوب بدون تشغيل Flutter (ما كانش مثبت في بيئة الكتابة). لازم تجربو وتصلحو أي خطأ عند أول تشغيل.
 
