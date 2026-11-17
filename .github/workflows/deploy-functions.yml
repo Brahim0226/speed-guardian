@@ -1,0 +1,39 @@
+name: Deploy Firebase Functions
+
+# Manual run only: Actions > Deploy Firebase Functions > Run workflow.
+# Needs the repository secrets FIREBASE_SERVICE_ACCOUNT (full JSON key) and FIREBASE_PROJECT_ID.
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install function dependencies
+        run: npm install --omit=dev
+        working-directory: functions
+
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools
+
+      - name: Write service account key
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          if [ -z "$FIREBASE_SERVICE_ACCOUNT" ]; then
+            echo "Secret FIREBASE_SERVICE_ACCOUNT is empty" >&2
+            exit 1
+          fi
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/sa.json"
+          python3 -c "import json,sys; d=json.load(open('$RUNNER_TEMP/sa.json')); print('key for', d['client_email'])"
+
+      - name: Deploy functions and Firestore rules
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/sa.json
+        run: firebase deploy --only functions,firestore:rules --project "${{ secrets.FIREBASE_PROJECT_ID }}" --non-interactive --force
