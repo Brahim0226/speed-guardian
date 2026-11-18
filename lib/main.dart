@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'firebase_options.dart';
 import 'services/alert_listener_service.dart';
 import 'services/alert_service.dart';
+import 'services/limit_resolver.dart';
 import 'services/location_service.dart';
 import 'services/overspeed_detector.dart';
 import 'services/pairing_service.dart';
@@ -54,6 +55,12 @@ class _HomePageState extends State<HomePage> {
   bool _driving = false;
   double _speed = 0;
   double? _limit;
+  LimitSource _limitSource = LimitSource.unknown;
+
+  /// Speed limit chosen by hand; null means "automatic" (map data).
+  double? _manualLimit;
+  static const _manualOptions = [30, 40, 50, 60, 80, 100, 120];
+
   String? _message;
 
   @override
@@ -87,7 +94,12 @@ class _HomePageState extends State<HomePage> {
 
     _detector.reset();
     _sub = _location.speedStream().listen((r) async {
-      final limit = await _limits.limitAt(r.latitude, r.longitude);
+      // A manual choice wins, so skip the map request when one is set.
+      final manual = _manualLimit;
+      final mapLimit =
+          manual == null ? await _limits.limitAt(r.latitude, r.longitude) : null;
+      final resolved = resolveLimit(manualKmh: _manualLimit, mapKmh: mapLimit);
+      final limit = resolved.kmh;
       final event = _detector.update(
         speedKmh: r.speedKmh,
         limitKmh: limit,
@@ -112,6 +124,7 @@ class _HomePageState extends State<HomePage> {
       setState(() {
         _speed = r.speedKmh;
         _limit = limit;
+        _limitSource = resolved.source;
       });
     });
     setState(() {
@@ -128,6 +141,28 @@ class _HomePageState extends State<HomePage> {
       _driving = false;
       _speed = 0;
     });
+  }
+
+  /// Pick the limit by hand, or pass null to go back to automatic (map) mode.
+  void _setManualLimit(double? value) {
+    setState(() {
+      _manualLimit = value;
+      if (value != null) {
+        _limit = value;
+        _limitSource = LimitSource.manual;
+      } else {
+        _limit = null;
+        _limitSource = LimitSource.unknown;
+      }
+    });
+  }
+
+  String _limitText() {
+    final limit = _limit;
+    if (limit == null) return 'السرعة القصوى: غير معروفة';
+    final source =
+        _limitSource == LimitSource.manual ? 'يدوي' : 'من الخريطة';
+    return 'السرعة القصوى: ${limit.round()} km/h ($source)';
   }
 
   /// Sends a fake alert to the partner so the whole chain can be tested without driving.
@@ -177,15 +212,44 @@ class _HomePageState extends State<HomePage> {
                         '${_speed.round()} km/h',
                         style: Theme.of(context).textTheme.displayMedium,
                       ),
-                      Text(
-                        _limit == null
-                            ? 'السرعة القصوى: غير معروفة'
-                            : 'السرعة القصوى: ${_limit!.round()} km/h',
-                      ),
+                      Text(_limitText()),
                     ],
                   ),
                 ),
               ),
+              const SizedBox(height: 16),
+              const Text(
+                'السرعة القصوى للطريق',
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                alignment: WrapAlignment.center,
+                children: [
+                  ChoiceChip(
+                    label: const Text('تلقائي'),
+                    selected: _manualLimit == null,
+                    onSelected: (_) => _setManualLimit(null),
+                  ),
+                  for (final v in _manualOptions)
+                    ChoiceChip(
+                      label: Text('$v'),
+                      selected: _manualLimit == v.toDouble(),
+                      onSelected: (_) => _setManualLimit(v.toDouble()),
+                    ),
+                ],
+              ),
+              if (_manualLimit == null && _limit == null)
+                const Padding(
+                  padding: EdgeInsets.only(top: 8),
+                  child: Text(
+                    'إذا بقيت غير معروفة، اختر السرعة القصوى يدويا '
+                    'باش يشتغل التنبيه.',
+                    textAlign: TextAlign.center,
+                  ),
+                ),
               const SizedBox(height: 16),
               FilledButton.icon(
                 onPressed:
