@@ -130,6 +130,21 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
+  /// Sends a fake alert to the partner so the whole chain can be tested without driving.
+  Future<void> _sendTestAlert(String partnerUid) async {
+    try {
+      await _alerts.sendOverspeedAlert(
+        fromUid: _pairing.uid,
+        toUid: partnerUid,
+        speedKmh: 90,
+        limitKmh: 50,
+      );
+      setState(() => _message = 'تم إرسال تنبيه تجريبي للشريك ✅');
+    } catch (e) {
+      setState(() => _message = 'فشل الإرسال: $e');
+    }
+  }
+
   Future<void> _pair() async {
     final ok = await _pairing.pairWith(_codeController.text);
     setState(() => _message = ok ? 'تم الربط ✅' : 'الكود غير صحيح');
@@ -200,6 +215,11 @@ class _HomePageState extends State<HomePage> {
                 OutlinedButton(onPressed: _pair, child: const Text('اربط')),
               ] else ...[
                 const Text('مربوط بالشريك ✅'),
+                OutlinedButton.icon(
+                  onPressed: () => _sendTestAlert(partnerUid),
+                  icon: const Icon(Icons.notifications_active),
+                  label: const Text('جرّب تنبيه للشريك'),
+                ),
                 TextButton(
                   onPressed: () => _pairing.unpair(partnerUid),
                   child: const Text('فك الربط'),
