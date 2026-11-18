@@ -14,11 +14,18 @@ service cloud.firestore {
       );
     }
 
-    // Alerts can only be created by the sender; clients cannot read/modify them.
+    // Alerts:
+    // - only the sender can create one, and only addressed to their own partner
+    // - only the addressee can read it (the app listens to its own alerts)
+    // - nobody can edit or delete from the client
     match /alerts/{alertId} {
       allow create: if request.auth != null
-        && request.resource.data.fromUid == request.auth.uid;
-      allow read, update, delete: if false;
+        && request.resource.data.fromUid == request.auth.uid
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.partnerUid
+           == request.resource.data.toUid;
+      allow read: if request.auth != null
+        && resource.data.toUid == request.auth.uid;
+      allow update, delete: if false;
     }
   }
 }

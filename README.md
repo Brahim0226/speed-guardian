@@ -98,6 +98,11 @@ flutter run
 - كل طرف يوافق على الربط ويقدر يفكّو في أي وقت.
 - نتبع شروط Google Play / App Store حول الموقع في الخلفية (إفصاح واضح للمستخدم).
 
+## كيفاش يوصل الإشعار للشريك / How the partner gets the alert
+
+- **الحالي (مجاني، بدون Blaze):** تطبيق الشريك يتابع وثائق `alerts` الموجهة له في Firestore ويعرض **إشعارا محليا** (`lib/services/alert_listener_service.dart`). يخدم طالما التطبيق شغال في الخلفية؛ بعض الهواتف توقفه لتوفير البطارية، لذلك لازم نجعل البطارية «بدون قيود» للتطبيق.
+- **لاحقا (أضمن):** نشر Cloud Function (`functions/index.js`) ترسل Push عبر FCM حتى والتطبيق مغلق. تحتاج خطة Blaze ثم تشغيل workflow `Deploy Firebase Functions`.
+
 ## حدود معروفة / Known limitations (MVP)
 
 - **الأمان:** قواعد Firestore الحالية بسيطة: أي مستخدم مسجّل يقدر يقرأ وثائق `users` (باش يخدم البحث بالكود). قبل النشر الحقيقي لازم ننقل الربط إلى Cloud Function ونخبّيو `fcmToken`.

@@ -42,3 +42,34 @@ for name in ("build.gradle.kts", "build.gradle"):
 
 if not patched:
     print("warning: could not patch minSdk (already custom?)", file=sys.stderr)
+
+
+# flutter_local_notifications needs core library desugaring.
+DESUGAR_VERSION = "2.1.4"
+for name in ("build.gradle.kts", "build.gradle"):
+    gradle = pathlib.Path("android/app") / name
+    if not gradle.exists():
+        continue
+    src = gradle.read_text()
+    kts = name.endswith(".kts")
+    if "coreLibraryDesugaring" in src:
+        print(f"{name}: desugaring already configured")
+        break
+
+    flag = "isCoreLibraryDesugaringEnabled = true" if kts else "coreLibraryDesugaringEnabled true"
+    dep = (
+        f'    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:{DESUGAR_VERSION}")'
+        if kts
+        else f"    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:{DESUGAR_VERSION}'"
+    )
+
+    new, n = re.subn(r"(compileOptions\s*\{)", r"\1\n        " + flag, src, count=1)
+    if n == 0:
+        print(f"warning: {name} has no compileOptions block", file=sys.stderr)
+        break
+    new += f"\ndependencies {{\n{dep}\n}}\n"
+    gradle.write_text(new)
+    print(f"{name}: desugaring enabled")
+    break
+else:
+    print("warning: no app gradle file found for desugaring", file=sys.stderr)
