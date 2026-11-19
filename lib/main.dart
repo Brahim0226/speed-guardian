@@ -10,6 +10,8 @@ import 'firebase_options.dart';
 import 'services/alert_listener_service.dart';
 import 'services/alert_service.dart';
 import 'services/limit_resolver.dart';
+import 'services/live_speed.dart';
+import 'services/live_speed_service.dart';
 import 'services/location_service.dart';
 import 'services/overspeed_detector.dart';
 import 'services/pairing_service.dart';
@@ -47,10 +49,19 @@ class _HomePageState extends State<HomePage> {
   final _limits = SpeedLimitService();
   final _alerts = AlertService();
   final _alertListener = AlertListenerService();
+  final _live = LiveSpeedService();
   final _detector = OverspeedDetector();
   final _codeController = TextEditingController();
 
   StreamSubscription<SpeedReading>? _sub;
+
+  // Partner's live speed (shown on this phone) and our own sharing switch.
+  bool _shareSpeed = true;
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _myDocSub;
+  StreamSubscription<LiveSpeed?>? _liveSub;
+  String? _watchedPartner;
+  LiveSpeed? _partnerLive;
+  Timer? _tick;
   bool _ready = false;
   bool _driving = false;
   double _speed = 0;
@@ -70,13 +81,41 @@ class _HomePageState extends State<HomePage> {
       // Show a local notification when the partner is speeding.
       await _alertListener.init();
       _alertListener.start(_pairing.uid);
+
+      // Follow the partner's live speed whenever the pairing changes.
+      _myDocSub = _pairing
+          .myDoc()
+          .listen((d) => _watchPartner(d.data()?['partnerUid'] as String?));
+      // Re-check freshness: if the partner stops sending, the card must go stale.
+      _tick = Timer.periodic(const Duration(seconds: 5), (_) {
+        if (mounted && _partnerLive != null) setState(() {});
+      });
+
       if (mounted) setState(() => _ready = true);
     });
+  }
+
+  void _watchPartner(String? partnerUid) {
+    if (partnerUid == _watchedPartner) return;
+    _liveSub?.cancel();
+    _liveSub = null;
+    _watchedPartner = partnerUid;
+    if (mounted) setState(() => _partnerLive = null);
+    if (partnerUid == null) return;
+    _liveSub = _live.watch(partnerUid).listen(
+      (live) {
+        if (mounted) setState(() => _partnerLive = live);
+      },
+      onError: (_) {},
+    );
   }
 
   @override
   void dispose() {
     _sub?.cancel();
+    _myDocSub?.cancel();
+    _liveSub?.cancel();
+    _tick?.cancel();
     _alertListener.stop();
     _codeController.dispose();
     super.dispose();
@@ -120,6 +159,15 @@ class _HomePageState extends State<HomePage> {
         );
       }
 
+      // Let the partner see the current speed (throttled inside the service).
+      if (_shareSpeed) {
+        _live.publish(
+          uid: _pairing.uid,
+          speedKmh: r.speedKmh,
+          limitKmh: limit,
+        );
+      }
+
       if (!mounted) return;
       setState(() {
         _speed = r.speedKmh;
@@ -137,10 +185,54 @@ class _HomePageState extends State<HomePage> {
     await _sub?.cancel();
     _sub = null;
     _detector.reset();
+    // Tell the partner we are no longer driving.
+    await _live.stop(_pairing.uid);
+    if (!mounted) return;
     setState(() {
       _driving = false;
       _speed = 0;
     });
+  }
+
+  void _setShareSpeed(bool value) {
+    setState(() => _shareSpeed = value);
+    // Turning sharing off mid-trip must clear what the partner currently sees.
+    if (!value) _live.stop(_pairing.uid);
+  }
+
+  Widget _partnerCard(BuildContext context) {
+    final live = _partnerLive;
+    final active =
+        (live != null && live.isActive(DateTime.now())) ? live : null;
+    final scheme = Theme.of(context).colorScheme;
+
+    return Card(
+      color: (active != null && active.overLimit) ? scheme.errorContainer : null,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            const Text('سرعة الشريك'),
+            const SizedBox(height: 4),
+            if (active != null) ...[
+              Text(
+                '${active.speedKmh.round()} km/h',
+                style: Theme.of(context).textTheme.displaySmall,
+              ),
+              Text(
+                active.limitKmh == null
+                    ? 'السرعة القصوى: غير معروفة'
+                    : 'السرعة القصوى: ${active.limitKmh!.round()} km/h',
+              ),
+            ] else
+              const Text(
+                'الشريك لا يسوق حاليا (أو لا توجد بيانات حديثة)',
+                textAlign: TextAlign.center,
+              ),
+          ],
+        ),
+      ),
+    );
   }
 
   /// Pick the limit by hand, or pass null to go back to automatic (map) mode.
@@ -174,6 +266,18 @@ class _HomePageState extends State<HomePage> {
         speedKmh: 90,
         limitKmh: 50,
       );
+      // Also show a fake live speed for a few seconds, to test the partner card.
+      if (_shareSpeed) {
+        await _live.publish(
+          uid: _pairing.uid,
+          speedKmh: 90,
+          limitKmh: 50,
+          force: true,
+        );
+        Future.delayed(const Duration(seconds: 15), () {
+          if (!_driving) _live.stop(_pairing.uid);
+        });
+      }
       setState(() => _message = 'تم إرسال تنبيه تجريبي للشريك ✅');
     } catch (e) {
       setState(() => _message = 'فشل الإرسال: $e');
@@ -203,6 +307,10 @@ class _HomePageState extends State<HomePage> {
           return ListView(
             padding: const EdgeInsets.all(20),
             children: [
+              if (partnerUid != null) ...[
+                _partnerCard(context),
+                const SizedBox(height: 16),
+              ],
               Card(
                 child: Padding(
                   padding: const EdgeInsets.all(16),
@@ -256,6 +364,12 @@ class _HomePageState extends State<HomePage> {
                     _driving ? _stopDriving : () => _startDriving(partnerUid),
                 icon: Icon(_driving ? Icons.stop : Icons.directions_car),
                 label: Text(_driving ? 'وقف القيادة' : 'بدأ القيادة'),
+              ),
+              SwitchListTile(
+                value: _shareSpeed,
+                onChanged: _setShareSpeed,
+                title: const Text('مشاركة سرعتي مباشرة مع الشريك'),
+                subtitle: const Text('يشوف سرعتك فقط أثناء القيادة، ماشي موقعك.'),
               ),
               if (_message != null)
                 Padding(
